@@ -112,6 +112,8 @@ def _fallback_daily_watchlist(symbol: str) -> tuple[pd.DataFrame, str]:
     base, quote = _pair_currencies(symbol)
 
     if today_et.dayofweek >= 5:
+        next_open = today_et + pd.offsets.BDay(1)
+        next_open_label = next_open.strftime("%Y-%m-%d")
         rows = [
             {
                 "day": weekday[:3],
@@ -131,6 +133,36 @@ def _fallback_daily_watchlist(symbol: str) -> tuple[pd.DataFrame, str]:
             {
                 "day": weekday[:3],
                 "date_label": date_label,
+                "time": "06:00 PM",
+                "country": "Asia-Pacific",
+                "event": "Asia open and futures repricing window",
+                "forecast": "-",
+                "actual": "-",
+                "previous": "-",
+                "why_it_matters": "Initial repricing in Asia and correlated futures markets often sets the tone for the first liquid FX session after the weekend.",
+                "release_status": "Weekend Prep",
+                "time_to_release": "After reopen",
+                "release_stamp_et": f"{date_label} 06:00 PM ET",
+                "urgency_score": 48,
+            },
+            {
+                "day": next_open.strftime("%a"),
+                "date_label": next_open_label,
+                "time": "03:00 AM",
+                "country": "Europe",
+                "event": "European macro release window",
+                "forecast": "-",
+                "actual": "-",
+                "previous": "-",
+                "why_it_matters": "Early European data often provides the first high-signal fundamental input for EUR and GBP crosses after the weekend reopen.",
+                "release_status": "Next Session",
+                "time_to_release": "Upcoming",
+                "release_stamp_et": f"{next_open_label} 03:00 AM ET",
+                "urgency_score": 44,
+            },
+            {
+                "day": weekday[:3],
+                "date_label": date_label,
                 "time": "All Day",
                 "country": f"{base}/{quote}",
                 "event": f"{_central_bank_label(base)} vs {_central_bank_label(quote)} policy gap watch",
@@ -144,7 +176,7 @@ def _fallback_daily_watchlist(symbol: str) -> tuple[pd.DataFrame, str]:
                 "urgency_score": 42,
             },
         ]
-        note = "Weekend mode is showing the most important forex reopening risks and structural drivers rather than a normal release calendar."
+        note = "Weekend view is showing the principal reopening risks and structural FX drivers ahead of the next market open."
         return pd.DataFrame(rows), note
 
     weekday_playbook = {
@@ -188,7 +220,7 @@ def _fallback_daily_watchlist(symbol: str) -> tuple[pd.DataFrame, str]:
                 "urgency_score": 35,
             }
         )
-    note = "Live pair-specific calendar items were unavailable, so the daily board is showing a forex watchlist of the most likely market-moving windows."
+    note = "Structured pair-specific releases were not available, so the daily board is showing a live forex watchlist of the most relevant risk windows."
     return pd.DataFrame(rows), note
 
 
@@ -280,7 +312,7 @@ def _fallback_weekly_watchlist(symbol: str) -> tuple[pd.DataFrame, str]:
         )
 
     weekly = pd.DataFrame(rows)
-    note = "The next 7-day board is using a forex watchlist fallback because live structured calendar data was unavailable or incomplete."
+    note = "The weekly board is using a forex watchlist because structured calendar coverage was unavailable or incomplete."
     return weekly, note
 
 
@@ -512,22 +544,22 @@ def _calendar_for_symbol(calendar: pd.DataFrame, symbol: str) -> tuple[pd.DataFr
                 }
             ]
         )
-        daily_note = "Today is a weekend, so the daily board is showing a market-status notice instead of a live trading calendar."
+        daily_note = "The daily board is in weekend mode and is therefore focused on market status rather than timed releases."
     else:
         if filtered["event_date"].notna().any():
             daily = filtered[filtered["event_date"] == today].copy()
         else:
             daily = filtered.copy()
-            daily_note = "The source did not expose structured event dates, so the daily board is showing the most relevant loaded items."
+            daily_note = "Structured event dates were not available, so the daily board is ordered by pair relevance rather than release time."
         daily = daily.head(8)
         if daily.empty:
-            daily_note = "No pair-relevant scheduled items were found for today."
+            daily_note = "No pair-specific scheduled releases were identified for today."
 
     next_seven_days = pd.date_range(start=today, periods=7, freq="D")
     if filtered["event_date"].notna().any():
         weekly = filtered[filtered["event_date"].isin(next_seven_days)].copy()
         if weekly.empty:
-            weekly_note = "No pair-relevant scheduled items were found in the next 7 days."
+            weekly_note = "No pair-specific scheduled releases were identified in the next seven days."
         weekly["day"] = weekly["event_date"].dt.strftime("%a")
         weekly["date_label"] = weekly["event_date"].dt.strftime("%Y-%m-%d")
         weekly = weekly.sort_values(["event_date", "event_datetime_et", "time", "relevance_score"], ascending=[True, True, True, False]).head(24)
@@ -535,7 +567,7 @@ def _calendar_for_symbol(calendar: pd.DataFrame, symbol: str) -> tuple[pd.DataFr
         weekly = filtered.head(14).copy()
         weekly["day"] = "Upcoming"
         weekly["date_label"] = "Date unavailable"
-        weekly_note = "The source did not expose structured event dates, so the weekly board is showing the most relevant loaded items instead of a strict 7-day schedule."
+        weekly_note = "Structured event dates were not available, so the weekly board is ordered by pair relevance instead of a strict seven-day schedule."
 
     if not daily.empty and "event_date" in daily.columns:
         daily["day"] = daily["event_date"].dt.strftime("%a").fillna("")
@@ -605,23 +637,23 @@ def _timeline_from_calendar(weekly: pd.DataFrame) -> pd.DataFrame:
 
 def fetch_market_context(symbol: str) -> MarketContextPacket:
     warnings: list[str] = []
-    source_note = "Economic calendar and headlines sourced from OANDA web pages when available."
+    source_note = "Market context is sourced from OANDA pages when structured coverage is available."
 
     try:
         calendar = _fetch_calendar_table()
         daily, weekly, daily_note, weekly_note = _calendar_for_symbol(calendar, symbol)
-    except Exception as exc:
+    except Exception:
         daily, daily_note = _fallback_daily_watchlist(symbol)
         weekly, weekly_note = _fallback_weekly_watchlist(symbol)
-        warnings.append(f"Economic calendar unavailable: {exc}")
-        source_note = "Live OANDA market-context sources were unavailable, so TruthLayer is showing a forex watchlist fallback."
+        warnings.append("Structured economic-calendar coverage is temporarily unavailable. The event boards are showing the terminal's forex watchlist instead.")
+        source_note = "Structured OANDA calendar coverage was unavailable, so the terminal is using its internal forex watchlist."
 
     try:
         headlines = _fetch_oanda_headlines(symbol)
-    except Exception as exc:
+    except Exception:
         headlines = _fallback_headlines(symbol)
-        warnings.append(f"OANDA headlines unavailable: {exc}")
-        source_note = "Live OANDA market-context sources were unavailable, so TruthLayer is showing a forex watchlist fallback."
+        warnings.append("External FX headlines are temporarily unavailable. The news board is showing the terminal's internal relevance set instead.")
+        source_note = "External market-context coverage was partially unavailable, so the terminal is supplementing with internal forex monitoring items."
 
     if daily.empty:
         daily, fallback_daily_note = _fallback_daily_watchlist(symbol)

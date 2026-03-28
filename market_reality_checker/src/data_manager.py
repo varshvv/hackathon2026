@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from config import DEFAULT_SEED, INTERVAL_CONFIG, LOOKBACK_DAYS, SYMBOLS
+from config import INTERVAL_CONFIG, LOOKBACK_DAYS, SYMBOLS
 
 try:
     import yfinance as yf
@@ -56,7 +56,7 @@ def _normalize(raw: pd.DataFrame) -> pd.DataFrame:
     return normalized
 
 
-def fetch_data(symbol: str, interval: str, lookback: str, seed: int = DEFAULT_SEED) -> DataPacket:
+def fetch_data(symbol: str, interval: str, lookback: str) -> DataPacket:
     provider_symbol = SYMBOLS[symbol]["provider_symbol"]
     interval_cfg = INTERVAL_CONFIG[interval]
 
@@ -79,14 +79,15 @@ def fetch_data(symbol: str, interval: str, lookback: str, seed: int = DEFAULT_SE
 
     latest_dt = live_df["timestamp"].max()
     latest_ts = latest_dt.strftime("%Y-%m-%d %H:%M")
+    latest_bar_et = latest_dt.tz_localize("UTC").tz_convert("America/New_York").strftime("%Y-%m-%d %H:%M ET")
     now_utc = pd.Timestamp.now(tz="UTC").tz_convert(None)
     staleness_minutes = int(max((now_utc - latest_dt).total_seconds() // 60, 0))
     return DataPacket(
         df=live_df,
         source="live",
-        note=f"Provider: Yahoo Finance via yfinance | Symbol: {provider_symbol} | Latest bar: {latest_ts}",
+        note=f"Provider: Yahoo Finance via yfinance | Symbol: {provider_symbol} | Latest bar: {latest_bar_et}",
         provider="Yahoo Finance via yfinance",
-        latest_bar=latest_ts,
+        latest_bar=latest_bar_et,
         staleness_minutes=staleness_minutes,
         row_count=len(live_df),
     )
@@ -97,7 +98,7 @@ def inject_anomaly(
     anomaly_type: str,
     severity: float,
     width: int,
-    seed: int = DEFAULT_SEED,
+    seed: int = 21,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     frame = df.copy().reset_index(drop=True)
     rng = np.random.default_rng(seed)

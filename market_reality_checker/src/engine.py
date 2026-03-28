@@ -50,6 +50,46 @@ class MarketEngine:
         frame["volume"] = pd.to_numeric(volume_source, errors="coerce").fillna(0.0)
         return frame
 
+    def _top_events(
+        self,
+        frame: pd.DataFrame,
+        triggered: pd.Series,
+        *,
+        score_series: pd.Series,
+        threshold_series: pd.Series | None = None,
+        extra_fields: dict[str, pd.Series] | None = None,
+        limit: int = 2,
+    ) -> list[dict[str, Any]]:
+        if not triggered.any():
+            return []
+
+        event_frame = frame.loc[triggered, ["timestamp", "return_pips"]].copy()
+        event_frame["score"] = score_series.loc[triggered].fillna(0.0)
+        if threshold_series is not None:
+            event_frame["threshold"] = threshold_series.loc[triggered].fillna(0.0)
+        if extra_fields:
+            for name, series in extra_fields.items():
+                event_frame[name] = series.loc[triggered]
+
+        event_frame = event_frame.sort_values("score", ascending=False).head(limit)
+        events: list[dict[str, Any]] = []
+        for _, row in event_frame.iterrows():
+            pip_move = float(row["return_pips"])
+            event = {
+                "timestamp": pd.Timestamp(row["timestamp"]).strftime("%Y-%m-%d %H:%M"),
+                "direction": "Up" if pip_move >= 0 else "Down",
+                "pip_move": round(pip_move, 2),
+                "score": round(float(row["score"]), 2),
+            }
+            if "threshold" in row and pd.notna(row["threshold"]):
+                event["threshold"] = round(float(row["threshold"]), 2)
+            if extra_fields:
+                for name in extra_fields:
+                    if name in row and pd.notna(row[name]):
+                        event[name] = round(float(row[name]), 2)
+            events.append(event)
+        return events
+
     def _return_spikes(self, frame: pd.DataFrame) -> dict[str, Any]:
         returns = frame["return"].abs()
         zscore = frame["return_abs_z"]
@@ -69,6 +109,16 @@ class MarketEngine:
             "severity": severity,
             "description": "Pip-normalized returns exceeded both the classical and robust short-window envelope.",
             "reason": "Used because abnormal one-bar displacement is the clearest fast signal that local price motion may be structurally off-regime.",
+            "events": self._top_events(
+                frame,
+                triggered.fillna(False),
+                score_series=severity_signal,
+                threshold_series=pip_floor.fillna(0.0),
+                extra_fields={
+                    "return_z": zscore,
+                    "robust_z": robust_z,
+                },
+            ),
         }
 
     def _volatility_shocks(self, frame: pd.DataFrame) -> dict[str, Any]:
@@ -89,6 +139,12 @@ class MarketEngine:
             "severity": severity,
             "description": "Realized volatility expanded materially versus both rolling and exponentially weighted baselines.",
             "reason": "Used because unstable tape is often a regime expansion problem, not just a single spike problem.",
+            "events": self._top_events(
+                frame,
+                triggered.fillna(False),
+                score_series=pd.concat([ratio, ratio_ewm], axis=1).max(axis=1),
+                extra_fields={"vol_ratio": ratio, "ewm_ratio": ratio_ewm},
+            ),
         }
 
     def _jump_revert(self, frame: pd.DataFrame) -> dict[str, Any]:
@@ -110,6 +166,12 @@ class MarketEngine:
             "severity": severity,
             "description": "A sharp displacement was rapidly retraced by at least 70 percent on the following bar.",
             "reason": "Used because fast reversal after a shock is one of the most intuitive suspicious-motion signatures in live demos and real workflows.",
+            "events": self._top_events(
+                frame,
+                triggered.fillna(False),
+                score_series=severity_signal.fillna(0.0),
+                extra_fields={"reversion_ratio": reversion_ratio * 100},
+            ),
         }
 
     def _directional_drift(self, frame: pd.DataFrame) -> dict[str, Any]:
@@ -128,6 +190,12 @@ class MarketEngine:
             "severity": severity,
             "description": "Directional persistence accumulated beyond what the short-term regime normally supports.",
             "reason": "Used because suspicious motion can be gradual and persistent rather than explosive.",
+            "events": self._top_events(
+                frame,
+                triggered.fillna(False),
+                score_series=(drift_z + sign_persistence).fillna(0.0),
+                extra_fields={"drift_z": drift_z, "sign_persistence": sign_persistence * 100},
+            ),
         }
 
     def _score(self, detections: list[dict[str, Any]]) -> dict[str, Any]:
@@ -148,6 +216,7 @@ class MarketEngine:
                     "severity": round(normalized, 2),
                     "description": detection["description"],
                     "reason": detection.get("reason", ""),
+                    "events": detection.get("events", []),
                 }
             )
 
@@ -156,11 +225,11 @@ class MarketEngine:
 
         integrity_score = max(0.0, min(100.0, 100.0 - suspiciousness))
         if integrity_score >= self.config["status_bands"]["Natural"]:
-            status = "Natural"
+            status = "Stable"
         elif integrity_score >= self.config["status_bands"]["Watchlist"]:
-            status = "Watchlist"
+            status = "Under Review"
         else:
-            status = "Suspicious"
+            status = "Escalated"
 
         return {
             "integrity_score": round(integrity_score, 1),
@@ -208,9 +277,9 @@ class MarketEngine:
 
         timestamps = frame.loc[frame["anomaly_flag"], "timestamp"].dt.strftime("%Y-%m-%d %H:%M").tolist()
         scored["summary"] = (
-            "Motion is broadly consistent with the prevailing regime."
+            "Observed behavior remains broadly consistent with the recent local regime."
             if not scored["triggered_rules"]
-            else "Multiple structural checks detected motion that deserves verification before trust."
+            else "Observed behavior is not fully explained by the recent local regime. Review the flagged intervals before relying on the move."
         )
         scored["flag_timestamps"] = timestamps[:8]
         scored["analysis_df"] = frame

@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 
 
 def render_gauge(score: float, status: str) -> go.Figure:
-    bar_color = "#f2f2ee" if status != "Suspicious" else "#d63a3a"
+    bar_color = "#f2f2ee"
     figure = go.Figure(
         go.Indicator(
             mode="gauge+number",
@@ -22,11 +22,11 @@ def render_gauge(score: float, status: str) -> go.Figure:
                 "bgcolor": "rgba(255,255,255,0.03)",
                 "borderwidth": 0,
                 "steps": [
-                    {"range": [0, 35], "color": "rgba(214,58,58,0.12)"},
+                    {"range": [0, 35], "color": "rgba(255,255,255,0.03)"},
                     {"range": [35, 65], "color": "rgba(255,255,255,0.06)"},
-                    {"range": [65, 100], "color": "rgba(255,255,255,0.11)"},
+                    {"range": [65, 100], "color": "rgba(255,255,255,0.10)"},
                 ],
-                "threshold": {"line": {"color": "#d63a3a", "width": 3}, "thickness": 0.7, "value": 65},
+                "threshold": {"line": {"color": "#f2f2ee", "width": 2}, "thickness": 0.7, "value": 65},
             },
         )
     )
@@ -62,7 +62,7 @@ def render_chart(
                 y=flagged["close"],
                 mode="markers",
                 name="Integrity Alerts",
-                marker={"symbol": "x", "size": 9, "color": "#d63a3a", "line": {"width": 1, "color": "#d63a3a"}},
+                marker={"symbol": "x", "size": 8, "color": "#f2f2ee", "line": {"width": 1, "color": "#f2f2ee"}},
             )
         )
 
@@ -115,10 +115,10 @@ def render_release_timeline(timeline: pd.DataFrame) -> go.Figure:
     ordered = timeline.copy()
     ordered["display_label"] = ordered["event"].str.slice(0, 46)
     color_map = {
-        "Imminent": "#d63a3a",
+        "Imminent": "#f2f2ee",
         "Approaching": "#f2f2ee",
         "Later": "#a8a8a2",
-        "Live Window": "#d63a3a",
+        "Live Window": "#f2f2ee",
         "Passed": "#666660",
         "Date/Time Pending": "#8a8a84",
     }
