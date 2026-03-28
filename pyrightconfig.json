@@ -1,0 +1,10 @@
+{
+  "venvPath": ".",
+  "venv": "market_reality_checker/.venv",
+  "include": [
+    "market_reality_checker"
+  ],
+  "extraPaths": [
+    "market_reality_checker"
+  ]
+}

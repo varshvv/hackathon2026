@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from io import StringIO
 from typing import Any
 from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
@@ -355,7 +356,7 @@ def _fetch_calendar_table() -> pd.DataFrame:
         raise RuntimeError("requests is not installed.")
     response = requests.get(OANDA_CALENDAR_URL, headers=REQUEST_HEADERS, timeout=20)
     response.raise_for_status()
-    tables = pd.read_html(response.text)
+    tables = pd.read_html(StringIO(response.text))
     if not tables:
         raise RuntimeError("No economic calendar tables were found on OANDA.")
 
