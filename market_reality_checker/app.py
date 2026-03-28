@@ -35,7 +35,7 @@ def get_market_context(symbol: str):
     return fetch_market_context(symbol)
 
 
-def draw_header(result: dict | None) -> None:
+def draw_header(result: dict | None, run_id: int = 0) -> None:
     status = result["status"] if result else "Idle"
     score = result["integrity_score"] if result else 100.0
     st.markdown(CSS, unsafe_allow_html=True)
@@ -59,18 +59,19 @@ def draw_header(result: dict | None) -> None:
         unsafe_allow_html=True,
     )
     gauge = render_gauge(score=score, status=status)
-    st.plotly_chart(gauge, use_container_width=True)
+    st.plotly_chart(gauge, width="stretch", key=f"integrity_gauge_{run_id}")
 
 
 def sidebar_controls() -> dict:
     with st.sidebar:
-        st.markdown("## Navigation")
-        page = st.radio("View", ["Terminal", "Use Cases"], index=0)
-        st.markdown("## Controls")
-        symbol = st.selectbox("Symbol", list(SYMBOLS.keys()), index=list(SYMBOLS.keys()).index(DEFAULT_SYMBOL))
-        interval = st.selectbox("Interval", list(INTERVAL_CONFIG.keys()), index=list(INTERVAL_CONFIG.keys()).index(DEFAULT_INTERVAL))
-        lookback = st.selectbox("Lookback", list(LOOKBACK_DAYS.keys()), index=list(LOOKBACK_DAYS.keys()).index(DEFAULT_LOOKBACK))
-        analyze = st.button("Run Analysis", type="primary", use_container_width=True) if page == "Terminal" else False
+        with st.form("terminal_controls_form", clear_on_submit=False):
+            st.markdown("## Navigation")
+            page = st.radio("View", ["Terminal", "Use Cases"], index=0)
+            st.markdown("## Controls")
+            symbol = st.selectbox("Symbol", list(SYMBOLS.keys()), index=list(SYMBOLS.keys()).index(DEFAULT_SYMBOL))
+            interval = st.selectbox("Interval", list(INTERVAL_CONFIG.keys()), index=list(INTERVAL_CONFIG.keys()).index(DEFAULT_INTERVAL))
+            lookback = st.selectbox("Lookback", list(LOOKBACK_DAYS.keys()), index=list(LOOKBACK_DAYS.keys()).index(DEFAULT_LOOKBACK))
+            analyze = st.form_submit_button("Run Analysis", type="primary", use_container_width=True) if page == "Terminal" else False
         st.caption("TruthLayer evaluates recent live forex bars from Yahoo Finance. If current data is unavailable, analysis does not proceed.")
     return {
         "page": page,
@@ -156,7 +157,7 @@ def render_callouts(triggered_rules: list[dict], timestamps: list[str]) -> None:
         st.caption("Flagged intervals: " + ", ".join(timestamps))
 
 
-def render_summary(result: dict, packet, interval: str) -> None:
+def render_summary(result: dict, packet, interval: str, controls: dict) -> None:
     now_et = pd.Timestamp.now(tz="America/New_York")
     weekend_market = now_et.dayofweek >= 5
     if weekend_market:
@@ -217,6 +218,7 @@ def render_summary(result: dict, packet, interval: str) -> None:
         f"""
         <div class="info-band">
             <strong>Assessment:</strong> {result['summary']}<br>
+            <span class="terminal-note">Analyzed market:</span> {result.get('pair', controls['symbol'])} | {controls['interval']} | {controls['lookback']}<br>
             <span class="terminal-note">Market data:</span> {provider_detail}<br>
             <span class="terminal-note">Context:</span> {data_context} Sample depth: {sample_depth} observations.
         </div>
@@ -231,12 +233,12 @@ def render_summary(result: dict, packet, interval: str) -> None:
         )
 
 
-def render_feature_table(result: dict) -> None:
+def render_feature_table(result: dict, run_id: int) -> None:
     st.markdown("### Diagnostic Snapshot")
     frame = pd.DataFrame(
         [{"Metric": key.replace("_", " ").title(), "Value": value} for key, value in result["features"].items()]
     )
-    st.dataframe(frame, use_container_width=True, hide_index=True)
+    st.dataframe(frame, width="stretch", hide_index=True)
 
 
 def render_methodology(result: dict) -> None:
@@ -497,7 +499,7 @@ def _render_calendar_cards(frame: pd.DataFrame, empty_message: str, show_intrada
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-def render_market_context(context_packet, symbol: str) -> None:
+def render_market_context(context_packet, symbol: str, run_id: int) -> None:
     timeline = getattr(context_packet, "timeline", pd.DataFrame())
     daily_note = getattr(context_packet, "daily_note", None)
     weekly_note = getattr(context_packet, "weekly_note", None)
@@ -521,7 +523,7 @@ def render_market_context(context_packet, symbol: str) -> None:
     with weekly_tab:
         if weekly_note:
             render_notice(weekly_note, tone="subtle")
-        st.plotly_chart(render_release_timeline(timeline), use_container_width=True)
+        st.plotly_chart(render_release_timeline(timeline), width="stretch", key=f"release_timeline_{run_id}")
         _render_calendar_cards(_weekly_schedule_frame(context_packet.weekly_calendar), "No weekly event data could be loaded right now.", show_intraday=False)
 
     with news_tab:
@@ -546,19 +548,11 @@ def render_market_context(context_packet, symbol: str) -> None:
 
 def main() -> None:
     controls = sidebar_controls()
-    draw_header(st.session_state.get("last_result"))
-
-    if controls["page"] == "Use Cases":
-        render_use_cases_page()
-        return
-
-    engine = MarketEngine()
-
-    if not controls["analyze"] and "last_result" not in st.session_state:
-        render_notice("Run the analysis to load the live market view. This terminal is forex-specific and evaluates current Yahoo Finance data only.", tone="subtle")
-        return
+    current_result = st.session_state.get("last_result")
+    current_run_id = st.session_state.get("last_run_id", 0)
 
     if controls["analyze"]:
+        engine = MarketEngine()
         with st.spinner("Refreshing market data and running analytical checks..."):
             try:
                 packet = get_dataset(
@@ -571,34 +565,53 @@ def main() -> None:
                 st.session_state["last_packet"] = packet
                 st.session_state["last_context"] = context_packet
                 st.session_state["last_result"] = result
+                st.session_state["last_controls"] = {
+                    "symbol": controls["symbol"],
+                    "interval": controls["interval"],
+                    "lookback": controls["lookback"],
+                }
+                st.session_state["last_run_id"] = current_run_id + 1
+                current_run_id = st.session_state["last_run_id"]
+                current_result = result
             except Exception as exc:
                 st.error(f"Analysis could not be completed: {exc}")
                 return
 
+    draw_header(current_result, run_id=current_run_id)
+
+    if controls["page"] == "Use Cases":
+        render_use_cases_page()
+        return
+
+    if current_result is None:
+        render_notice("Run the analysis to load the live market view. This terminal is forex-specific and evaluates current Yahoo Finance data only.", tone="subtle")
+        return
+
     packet = st.session_state["last_packet"]
     context_packet = st.session_state.get("last_context")
-    result = st.session_state["last_result"]
-    render_summary(result, packet, controls["interval"])
+    result = current_result
+    active_controls = st.session_state.get("last_controls", controls)
+    render_summary(result, packet, active_controls["interval"], active_controls)
 
     left, right = st.columns([1.45, 1])
     with left:
         st.markdown("### Price Monitor")
         chart = render_chart(result["analysis_df"], injection_meta=None)
-        st.plotly_chart(chart, use_container_width=True)
+        st.plotly_chart(chart, width="stretch", key=f"price_chart_{current_run_id}")
     with right:
         render_callouts(result["triggered_rules"], result["flag_timestamps"])
 
-    render_feature_table(result)
+    render_feature_table(result, current_run_id)
     render_methodology(result)
     if context_packet is not None:
-        render_market_context(context_packet, controls["symbol"])
+        render_market_context(context_packet, active_controls["symbol"], current_run_id)
     st.markdown("### Recent Observations")
     preview = result["analysis_df"][["timestamp", "close", "return_pips", "bar_range_pips", "rolling_volatility", "anomaly_score"]].tail(14).copy()
     preview["close"] = preview["close"].round(5)
     preview["return_pips"] = preview["return_pips"].round(2)
     preview["bar_range_pips"] = preview["bar_range_pips"].round(2)
     preview["rolling_volatility"] = (preview["rolling_volatility"] * 10000).round(2)
-    st.dataframe(preview, use_container_width=True, hide_index=True)
+    st.dataframe(preview, width="stretch", hide_index=True)
 
 
 if __name__ == "__main__":

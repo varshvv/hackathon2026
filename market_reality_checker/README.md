@@ -4,6 +4,36 @@ TruthLayer is a finance-track hackathon product built to answer a different ques
 
 The result is a lightweight market integrity terminal with a private-bank aesthetic: monochrome, editorial, calm, and severe only when the tape deserves it.
 
+## GitHub Overview
+
+TruthLayer is an explainable forex market verification tool. Instead of forecasting the next move, it evaluates whether the move already on screen appears consistent with its recent local regime.
+
+This project is designed for live demos, product storytelling, and practical decision support. It is especially useful when a trader, analyst, or judge wants a clear answer to a simple question:
+
+`Does this market move look trustworthy, unstable, or suspicious?`
+
+### What the app does
+
+- pulls recent live forex data for major currency pairs
+- scores recent behavior with explainable quantitative checks
+- highlights flagged bars and suspicious intervals
+- surfaces market context through calendar and headline panels
+- explains why a move was escalated in plain English
+
+### Who it is for
+
+- discretionary macro traders
+- FX analysts and strategists
+- sales and trading teams
+- treasury and risk users
+- hackathon judges who want a product with a clear use case and a defensible workflow
+
+### Why it is different
+
+Most market tools focus on prediction. TruthLayer focuses on verification.
+
+That makes it useful before action, not just before speculation. It helps users validate whether current price action appears orderly enough to trust before they respond to it.
+
 ## The Pitch
 
 Most tools try to forecast the next move.
@@ -24,8 +54,6 @@ This is not a trading bot, not a signal generator, and not a claim of institutio
 ## Core Features
 
 - Live forex analysis through Yahoo Finance via `yfinance`
-- Silent deterministic fallback to a Geometric Brownian Motion tape if the live feed fails
-- Simulator mode for deterministic `Spike Up`, `Spike Down`, `Drift`, and `Jump-Revert` scenarios
 - Explainable rule engine with:
   - Return Spike detection
   - Volatility Shock detection
@@ -35,9 +63,11 @@ This is not a trading bot, not a signal generator, and not a claim of institutio
 - Premium monochrome terminal UI with:
   - semi-circular integrity gauge
   - editorial headline section
-  - high-contrast metric cards
-  - restrained red anomaly overlays
-  - boxed “Security Callout” trigger feed
+  - desktop-first status strip
+  - restrained anomaly overlays
+  - exception summary with flagged-bar context
+  - dedicated use-cases / product-brief page
+  - market-context panels for daily calendar, weekly watchlist, and relevant headlines
 
 ## Stack
 
@@ -72,7 +102,7 @@ market_reality_checker/
   Contains the `MarketEngine` class with vectorized anomaly detection and weighted scoring.
 
 - `src/data_manager.py`
-  Handles market data retrieval through `yfinance`, normalization, deterministic anomaly injection, and the silent GBM fallback.
+  Handles live market data retrieval through `yfinance` and defensive normalization.
 
 - `src/visuals.py`
   Builds the monochrome integrity gauge and the main price terminal chart.
@@ -104,9 +134,9 @@ Captures sustained directional movement that persists beyond what the current sh
 
 TruthLayer starts from `100` and deducts points based on weighted rule severity.
 
-- `85-100`: `Natural`
-- `65-84`: `Watchlist`
-- `0-64`: `Suspicious`
+- `85-100`: `Stable`
+- `65-84`: `Under Review`
+- `0-64`: `Escalated`
 
 If multiple rules agree, the engine adds a confluence penalty. This makes the verdict feel more coherent during a live walkthrough.
 
@@ -133,27 +163,13 @@ HOME="$PWD" streamlit run app.py
 
 ## Demo Guide For Hacklanta Judges
 
-### Fastest Winning Demo
-
-1. Open the app.
-2. Choose `Simulator Mode`.
-3. Select `Jump-Revert`.
-4. Keep severity near `0.018` to `0.025`.
-5. Click `Run Integrity Audit`.
-
-This reliably produces:
-
-- a low Integrity Score
-- visible anomaly markers on the chart
-- boxed trigger callouts
-- a clean “why it was flagged” narrative
-
 ### Live Feed Demo
 
 1. Switch to `Live Mode`.
 2. Choose `EUR/USD` or `USD/JPY`.
-3. Run the audit.
-4. If Yahoo Finance is unavailable, TruthLayer silently swaps to a deterministic GBM tape so the demo still completes.
+3. Choose an interval and lookback window.
+4. Click `Run Analysis`.
+5. Walk through the score, assessment, flagged intervals, and market context.
 
 ### Story Track
 
@@ -166,16 +182,14 @@ Then walk judges through:
 1. the Integrity Gauge
 2. the status label
 3. the red anomaly markers
-4. the Security Callouts
-5. the fact that the product degrades gracefully if live data fails
+4. the Exception Summary
+5. the market-context panel and use-cases page
 
 ## Reliability Notes
 
 - No external database
 - No auth
 - No deployment dependency required for MVP
-- Deterministic fallback data path
-- Deterministic simulator mode
 - Graceful handling for NaNs, malformed timestamps, and missing volume
 
 ## Verification
@@ -192,12 +206,13 @@ The app is designed to handle:
 - empty or malformed market data
 - insufficient rolling windows
 - NaNs from calculations
-- demo-mode anomaly injection without breaking chart structure
+- partial market-context source outages without breaking the UI
 
 ## Future Extensions
 
 - More FX pairs and asset classes
 - Session-aware regime baselines
+- Higher-quality economic calendar providers
 - Exportable PDF integrity reports
 - Multi-panel microstructure diagnostics
 - Better anomaly clustering and regime segmentation

@@ -206,8 +206,11 @@ class MarketEngine:
             if not detection["triggered"]:
                 continue
             weight = weights.get(detection["name"], 15)
-            normalized = min(max(float(detection["severity"]) / 3.0, 0.0), 1.5)
-            impact = weight * normalized
+            raw_severity = max(float(detection["severity"]), 0.0)
+            normalized = min(np.log1p(raw_severity) / np.log(5.0), 1.25)
+            event_count = max(len(detection.get("events", [])), 1)
+            persistence_multiplier = min(1.0 + 0.08 * (event_count - 1), 1.24)
+            impact = weight * normalized * persistence_multiplier
             suspiciousness += impact
             triggered.append(
                 {
