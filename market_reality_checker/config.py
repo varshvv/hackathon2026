@@ -346,6 +346,43 @@ h1, h2, h3, h4 {
     letter-spacing: 0.06em;
 }
 
+.news-board {
+    display: grid;
+    gap: 0.8rem;
+}
+
+.news-item {
+    background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.025));
+    border: 1px solid var(--border);
+    border-radius: 22px;
+    padding: 1rem;
+}
+
+.news-meta {
+    color: var(--soft);
+    font-size: 0.72rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.news-headline a {
+    color: var(--text);
+    text-decoration: none;
+    font-family: "Source Serif 4", Georgia, serif;
+    font-size: 1.02rem;
+    line-height: 1.55;
+}
+
+.news-headline a:hover {
+    text-decoration: underline;
+}
+
+.news-why {
+    color: var(--muted);
+    margin-top: 0.45rem;
+    font-size: 0.86rem;
+}
+
 .stDataFrame, .stPlotlyChart {
     border-radius: 24px;
     overflow: hidden;

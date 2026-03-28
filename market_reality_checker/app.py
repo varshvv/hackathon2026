@@ -24,7 +24,7 @@ from config import (
 from src.data_manager import fetch_data, inject_anomaly
 from src.engine import MarketEngine
 from src.market_context import fetch_market_context
-from src.visuals import render_chart, render_gauge
+from src.visuals import render_chart, render_gauge, render_release_timeline
 
 st.set_page_config(page_title=f"{APP_NAME} | {APP_SUBTITLE}", page_icon="◆", layout="wide", initial_sidebar_state="expanded")
 
@@ -202,6 +202,10 @@ def _today_calendar_frame(frame: pd.DataFrame) -> pd.DataFrame:
                     "actual": "-",
                     "previous": "-",
                     "why_it_matters": "Major spot forex trading is largely closed, so scheduled price-sensitive flow is limited until the market reopens.",
+                    "release_status": "Weekend",
+                    "time_to_release": "Closed",
+                    "release_stamp_et": "Weekend ET",
+                    "urgency_score": 5,
                 }
             ]
         )
@@ -221,6 +225,10 @@ def _today_calendar_frame(frame: pd.DataFrame) -> pd.DataFrame:
                 "actual": "-",
                 "previous": "-",
                 "why_it_matters": "The current source did not provide a scheduled release for this pair today, but the board remains active for manual monitoring.",
+                "release_status": "Today",
+                "time_to_release": "Open",
+                "release_stamp_et": "Today ET",
+                "urgency_score": 12,
             }
         ]
     )
@@ -248,13 +256,17 @@ def _weekly_schedule_frame(frame: pd.DataFrame) -> pd.DataFrame:
                     {
                         "day": day_label,
                         "date_label": date_label,
-                        "time": "Weekend",
+                        "time": "",
                         "country": "FX Market",
                         "event": "Weekend trading pause",
                         "forecast": "-",
                         "actual": "-",
                         "previous": "-",
                         "why_it_matters": "Liquidity and scheduled macro flow are typically lighter because major spot forex markets are closed.",
+                        "release_status": "Weekend",
+                        "time_to_release": "Closed",
+                        "release_stamp_et": "Weekend ET",
+                        "urgency_score": 5,
                     }
                 )
             else:
@@ -262,13 +274,17 @@ def _weekly_schedule_frame(frame: pd.DataFrame) -> pd.DataFrame:
                     {
                         "day": day_label,
                         "date_label": date_label,
-                        "time": "Scheduled",
+                        "time": "",
                         "country": "Macro Desk",
                         "event": "No pair-linked release loaded",
                         "forecast": "-",
                         "actual": "-",
                         "previous": "-",
                         "why_it_matters": "No relevant scheduled event was parsed for this day, so the board shows a clean placeholder instead of leaving the schedule blank.",
+                        "release_status": "Scheduled",
+                        "time_to_release": "Pending",
+                        "release_stamp_et": f"{date_label} ET",
+                        "urgency_score": 10,
                     }
                 )
         else:
@@ -277,20 +293,42 @@ def _weekly_schedule_frame(frame: pd.DataFrame) -> pd.DataFrame:
     weekly = pd.DataFrame(rows)
     if "lookup_key" in weekly.columns:
         weekly = weekly.drop(columns=["lookup_key"])
+    if not weekly.empty:
+        weekly["time"] = ""
+        weekly["release_stamp_et"] = weekly.get("date_label", "")
+        weekly["time_to_release"] = ""
+        weekly["release_status"] = weekly["release_status"].replace(
+            {
+                "Imminent": "This Week",
+                "Approaching": "This Week",
+                "Later": "This Week",
+                "Live Window": "This Week",
+                "Passed": "Earlier This Week",
+                "Date/Time Pending": "Upcoming",
+            }
+        )
     return weekly.reset_index(drop=True)
 
 
-def _render_calendar_cards(frame: pd.DataFrame, empty_message: str) -> None:
+def _render_calendar_cards(frame: pd.DataFrame, empty_message: str, show_intraday: bool = True) -> None:
     if frame.empty:
         st.info(empty_message)
         return
 
     st.markdown('<div class="calendar-board">', unsafe_allow_html=True)
     for row in frame.to_dict("records"):
-        stamp_parts = [part for part in [row.get("day", ""), row.get("date_label", ""), row.get("time", "")] if part]
+        stamp_values = [row.get("day", ""), row.get("date_label", "")]
+        if show_intraday:
+            stamp_values.append(row.get("time", ""))
+        stamp_parts = [part for part in stamp_values if part]
         stamp = " • ".join(stamp_parts)
         meta_parts = [part for part in [row.get("country", ""), row.get("forecast", ""), row.get("actual", ""), row.get("previous", "")] if part and part != "-"]
         meta = " | ".join(meta_parts)
+        if show_intraday:
+            status_fields = [row.get("release_status", ""), row.get("time_to_release", ""), row.get("release_stamp_et", "")]
+        else:
+            status_fields = [row.get("release_status", ""), row.get("country", "")]
+        status_line = " | ".join([part for part in status_fields if part and part != "-"])
         st.markdown(
             f"""
             <div class="calendar-item">
@@ -299,6 +337,7 @@ def _render_calendar_cards(frame: pd.DataFrame, empty_message: str) -> None:
                 </div>
                 <div class="calendar-title">{row.get('event', '')}</div>
                 <div class="calendar-meta">{meta}</div>
+                <div class="calendar-meta">{status_line}</div>
                 <div class="calendar-reason">Why it matters: {row.get('why_it_matters', 'pair relevance')}</div>
             </div>
             """,
@@ -308,33 +347,50 @@ def _render_calendar_cards(frame: pd.DataFrame, empty_message: str) -> None:
 
 
 def render_market_context(context_packet, symbol: str) -> None:
+    timeline = getattr(context_packet, "timeline", pd.DataFrame())
+    daily_note = getattr(context_packet, "daily_note", None)
+    weekly_note = getattr(context_packet, "weekly_note", None)
+    warning = getattr(context_packet, "warning", None)
+    headlines = getattr(context_packet, "headlines", pd.DataFrame())
+    source_note = getattr(context_packet, "source_note", "Market context sources unavailable.")
+
     st.markdown("### Event And Announcement Calendar")
     st.caption(f"For {symbol}, the terminal surfaces scheduled macro events and relevant OANDA headlines that may affect price action.")
 
-    if context_packet.warning:
-        st.warning(context_packet.warning)
+    if warning:
+        st.warning(warning)
 
     daily_tab, weekly_tab, news_tab = st.tabs(["Daily Calendar", "Weekly Calendar", "Relevant News"])
 
     with daily_tab:
-        if context_packet.daily_note:
-            st.info(context_packet.daily_note)
-        _render_calendar_cards(_today_calendar_frame(context_packet.daily_calendar), "No daily event data could be loaded right now.")
+        if daily_note:
+            st.info(daily_note)
+        _render_calendar_cards(_today_calendar_frame(context_packet.daily_calendar), "No daily event data could be loaded right now.", show_intraday=True)
 
     with weekly_tab:
-        if context_packet.weekly_note:
-            st.info(context_packet.weekly_note)
-        _render_calendar_cards(_weekly_schedule_frame(context_packet.weekly_calendar), "No weekly event data could be loaded right now.")
+        if weekly_note:
+            st.info(weekly_note)
+        st.plotly_chart(render_release_timeline(timeline), use_container_width=True)
+        _render_calendar_cards(_weekly_schedule_frame(context_packet.weekly_calendar), "No weekly event data could be loaded right now.", show_intraday=False)
 
     with news_tab:
-        if context_packet.headlines.empty:
+        if headlines.empty:
             st.info("No relevant OANDA headlines could be loaded right now.")
         else:
-            for row in context_packet.headlines.to_dict("records"):
+            st.markdown('<div class="news-board">', unsafe_allow_html=True)
+            for row in headlines.to_dict("records"):
                 st.markdown(
-                    f"- [{row['headline']}]({row['url']}) — {row['why_it_matters']}"
+                    f"""
+                    <div class="news-item">
+                        <div class="news-meta">{row.get('source', 'Source')} • {row.get('market_angle', 'Macro')} • {row.get('relevance_label', 'Relevant')}</div>
+                        <div class="news-headline"><a href="{row['url']}" target="_blank">{row['headline']}</a></div>
+                        <div class="news-why">Why it matters: {row['why_it_matters']}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
                 )
-            st.caption(context_packet.source_note)
+            st.markdown("</div>", unsafe_allow_html=True)
+            st.caption(source_note)
 
 
 def main() -> None:

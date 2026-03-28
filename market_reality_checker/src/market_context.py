@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urljoin
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -30,6 +31,7 @@ class MarketContextPacket:
     daily_calendar: pd.DataFrame
     weekly_calendar: pd.DataFrame
     headlines: pd.DataFrame
+    timeline: pd.DataFrame
     source_note: str
     warning: str | None = None
     daily_note: str | None = None
@@ -39,6 +41,18 @@ class MarketContextPacket:
 def _pair_currencies(symbol: str) -> list[str]:
     base, quote = symbol.split("/")
     return [base, quote]
+
+
+def _central_bank_label(currency: str) -> str:
+    return {
+        "USD": "Federal Reserve",
+        "EUR": "European Central Bank",
+        "JPY": "Bank of Japan",
+        "GBP": "Bank of England",
+        "AUD": "Reserve Bank of Australia",
+        "CHF": "Swiss National Bank",
+        "CAD": "Bank of Canada",
+    }.get(currency, f"{currency} Central Bank")
 
 
 def _event_keywords(symbol: str) -> list[str]:
@@ -74,6 +88,234 @@ def _score_relevance(text: str, symbol: str) -> tuple[int, str]:
         reasons.append("macro-sensitive")
 
     return score, ", ".join(dict.fromkeys(reasons[:3]))
+
+
+def _news_angle(text: str) -> str:
+    lowered = text.lower()
+    if any(term in lowered for term in ["cpi", "inflation", "ppi"]):
+        return "Inflation"
+    if any(term in lowered for term in ["rate", "fed", "ecb", "boj", "boe", "rba", "boc", "snb"]):
+        return "Central Bank"
+    if any(term in lowered for term in ["jobs", "payroll", "employment", "labor"]):
+        return "Labor"
+    if any(term in lowered for term in ["gdp", "growth", "recession"]):
+        return "Growth"
+    if any(term in lowered for term in ["risk", "geopolitical", "tariff", "trade"]):
+        return "Risk Sentiment"
+    return "Macro"
+
+
+def _fallback_daily_watchlist(symbol: str) -> tuple[pd.DataFrame, str]:
+    today_et = pd.Timestamp.now(tz=ZoneInfo("America/New_York")).normalize()
+    weekday = today_et.day_name()
+    date_label = today_et.strftime("%Y-%m-%d")
+    base, quote = _pair_currencies(symbol)
+
+    if today_et.dayofweek >= 5:
+        rows = [
+            {
+                "day": weekday[:3],
+                "date_label": date_label,
+                "time": "05:00 PM",
+                "country": "FX Market",
+                "event": "Sunday reopen gap-risk monitor",
+                "forecast": "-",
+                "actual": "-",
+                "previous": "-",
+                "why_it_matters": "Weekend headlines, geopolitical developments, and rate repricing can create opening gaps when forex liquidity returns.",
+                "release_status": "Weekend Prep",
+                "time_to_release": "Before reopen",
+                "release_stamp_et": f"{date_label} 05:00 PM ET",
+                "urgency_score": 55,
+            },
+            {
+                "day": weekday[:3],
+                "date_label": date_label,
+                "time": "All Day",
+                "country": f"{base}/{quote}",
+                "event": f"{_central_bank_label(base)} vs {_central_bank_label(quote)} policy gap watch",
+                "forecast": "-",
+                "actual": "-",
+                "previous": "-",
+                "why_it_matters": "Relative rate expectations are one of the biggest structural drivers of major FX pairs and often shape Monday reopening tone.",
+                "release_status": "Weekend Prep",
+                "time_to_release": "Active",
+                "release_stamp_et": "Weekend ET",
+                "urgency_score": 42,
+            },
+        ]
+        note = "Weekend mode is showing the most important forex reopening risks and structural drivers rather than a normal release calendar."
+        return pd.DataFrame(rows), note
+
+    weekday_playbook = {
+        0: [
+            ("08:30 AM", "US session setup and macro repricing", "Monday often starts with position resetting, weekend news digestion, and early repricing of central-bank expectations."),
+            ("11:00 AM", f"{_central_bank_label(base)} / {_central_bank_label(quote)} speaker-risk scan", "Central-bank comments can move FX quickly when the market is still defining the week’s narrative."),
+        ],
+        1: [
+            ("08:30 AM", "Inflation and growth surprise window", "Tuesday frequently carries inflation, survey, or growth releases that can reset rate-path expectations."),
+            ("02:00 PM", "Rates narrative check-in", "By Tuesday afternoon the market often sharpens its view on the week’s major macro narrative."),
+        ],
+        2: [
+            ("08:30 AM", "Midweek macro release cluster", "Wednesday often concentrates high-signal macro data and central-bank sensitivity."),
+            ("02:00 PM", "Policy path repricing", "Midweek is where rate-sensitive FX pairs often see the strongest repricing if data surprises land."),
+        ],
+        3: [
+            ("08:30 AM", "Labor and yield sensitivity watch", "Thursday data can move yields and quickly spill into major FX crosses."),
+            ("10:00 AM", "Risk sentiment transmission", "Late-week growth and sentiment data can shift carry trades and USD demand."),
+        ],
+        4: [
+            ("08:30 AM", "Friday payroll / close-risk window", "Friday macro surprises can trigger sharp FX moves and end-of-week position squaring."),
+            ("03:00 PM", "Weekend positioning unwind", "Into the close, traders often reduce risk ahead of the weekend, affecting short-term price action."),
+        ],
+    }
+    rows = []
+    for time_value, title, reason in weekday_playbook[today_et.dayofweek]:
+        rows.append(
+            {
+                "day": weekday[:3],
+                "date_label": date_label,
+                "time": time_value,
+                "country": f"{base}/{quote}",
+                "event": title,
+                "forecast": "-",
+                "actual": "-",
+                "previous": "-",
+                "why_it_matters": reason,
+                "release_status": "Watchlist",
+                "time_to_release": "Scheduled",
+                "release_stamp_et": f"{date_label} {time_value} ET",
+                "urgency_score": 35,
+            }
+        )
+    note = "Live pair-specific calendar items were unavailable, so the daily board is showing a forex watchlist of the most likely market-moving windows."
+    return pd.DataFrame(rows), note
+
+
+def _fallback_weekly_watchlist(symbol: str) -> tuple[pd.DataFrame, str]:
+    today_et = pd.Timestamp.now(tz=ZoneInfo("America/New_York")).normalize()
+    base, quote = _pair_currencies(symbol)
+    upcoming_days = pd.date_range(today_et, periods=7, freq="D")
+    rows: list[dict[str, Any]] = []
+
+    for date_value in upcoming_days:
+        day_idx = date_value.dayofweek
+        day_label = date_value.strftime("%a")
+        date_label = date_value.strftime("%Y-%m-%d")
+        if day_idx >= 5:
+            rows.append(
+                {
+                    "day": day_label,
+                    "date_label": date_label,
+                    "time": "Weekend",
+                    "country": "FX Market",
+                    "event": "Weekend headline and reopen-risk watch",
+                    "forecast": "-",
+                    "actual": "-",
+                    "previous": "-",
+                    "why_it_matters": "Weekend geopolitical and policy headlines can create Monday gap risk as forex trading resumes.",
+                    "release_status": "Weekend Prep",
+                    "time_to_release": "Watch",
+                    "release_stamp_et": "Weekend ET",
+                    "urgency_score": 30,
+                }
+            )
+            continue
+
+        if day_idx == 0:
+            event = "Monday positioning and weekend repricing"
+            reason = "Position resets and fresh macro interpretation often define Monday FX direction."
+            time_value = "08:30 AM"
+        elif day_idx == 1:
+            event = "Inflation / PMI sensitivity window"
+            reason = "Tuesday often carries inflation and activity releases that reprice rate expectations."
+            time_value = "08:30 AM"
+        elif day_idx == 2:
+            event = "Midweek central-bank and macro focus"
+            reason = "Wednesday is frequently the heaviest day for policy-sensitive FX narrative shifts."
+            time_value = "02:00 PM"
+        elif day_idx == 3:
+            event = "Labor / rates spillover watch"
+            reason = "Thursday data often transmits through yields into the major currency complex."
+            time_value = "08:30 AM"
+        else:
+            event = "Friday close-risk and macro surprise window"
+            reason = "Friday brings payroll-style risk, profit taking, and end-of-week de-risking."
+            time_value = "08:30 AM"
+
+        rows.append(
+            {
+                "day": day_label,
+                "date_label": date_label,
+                "time": time_value,
+                "country": f"{base}/{quote}",
+                "event": event,
+                "forecast": "-",
+                "actual": "-",
+                "previous": "-",
+                "why_it_matters": reason,
+                "release_status": "Watchlist",
+                "time_to_release": "Scheduled",
+                "release_stamp_et": f"{date_label} {time_value} ET",
+                "urgency_score": 28,
+            }
+        )
+
+        rows.append(
+            {
+                "day": day_label,
+                "date_label": date_label,
+                "time": "11:00 AM",
+                "country": f"{base}/{quote}",
+                "event": f"{_central_bank_label(base)} vs {_central_bank_label(quote)} policy divergence watch",
+                "forecast": "-",
+                "actual": "-",
+                "previous": "-",
+                "why_it_matters": "Relative central-bank stance remains one of the cleanest structural drivers of major FX trends.",
+                "release_status": "Structural Driver",
+                "time_to_release": "Scheduled",
+                "release_stamp_et": f"{date_label} 11:00 AM ET",
+                "urgency_score": 24,
+            }
+        )
+
+    weekly = pd.DataFrame(rows)
+    note = "The next 7-day board is using a forex watchlist fallback because live structured calendar data was unavailable or incomplete."
+    return weekly, note
+
+
+def _fallback_headlines(symbol: str) -> pd.DataFrame:
+    base, quote = _pair_currencies(symbol)
+    rows = [
+        {
+            "headline": f"{symbol} focus: watch the {_central_bank_label(base)} versus {_central_bank_label(quote)} policy gap",
+            "url": OANDA_ANALYSIS_URL,
+            "relevance_score": 8,
+            "why_it_matters": "Relative rate expectations are often the most important structural driver for major forex pairs.",
+            "market_angle": "Central Bank",
+            "source": "TruthLayer FX Watchlist",
+            "relevance_label": "High Relevance",
+        },
+        {
+            "headline": f"{symbol} focus: US yields, inflation surprises, and labor data can spill directly into majors",
+            "url": OANDA_CALENDAR_URL,
+            "relevance_score": 7,
+            "why_it_matters": "Yield repricing and macro surprises frequently transmit into USD crosses and broader G10 FX.",
+            "market_angle": "Macro",
+            "source": "TruthLayer FX Watchlist",
+            "relevance_label": "High Relevance",
+        },
+        {
+            "headline": f"{symbol} focus: risk sentiment and session handoff can distort short-term price action",
+            "url": OANDA_ANALYSIS_URL,
+            "relevance_score": 5,
+            "why_it_matters": "Asia, London, and New York session transitions can amplify moves when liquidity or risk appetite shifts quickly.",
+            "market_angle": "Risk Sentiment",
+            "source": "TruthLayer FX Watchlist",
+            "relevance_label": "Relevant",
+        },
+    ]
+    return pd.DataFrame(rows)
 
 
 def _fetch_calendar_table() -> pd.DataFrame:
@@ -140,6 +382,99 @@ def _prepare_dates(calendar: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
+def _parse_event_datetime_et(row: pd.Series) -> pd.Timestamp | pd.NaT:
+    if pd.isna(row.get("event_date")):
+        return pd.NaT
+
+    time_value = str(row.get("time", "")).strip().lower()
+    if not time_value or time_value in {"nan", "none", "all day", "holiday", "tentative", "closed", "weekend", "today", "scheduled"}:
+        return pd.NaT
+
+    cleaned = (
+        time_value.replace("et", "")
+        .replace("edt", "")
+        .replace("est", "")
+        .replace(".", ":")
+        .strip()
+    )
+    parsed_time = pd.to_datetime(cleaned, format="%H:%M", errors="coerce")
+    if pd.isna(parsed_time):
+        parsed_time = pd.to_datetime(cleaned, errors="coerce")
+    if pd.isna(parsed_time):
+        return pd.NaT
+
+    event_date = pd.Timestamp(row["event_date"]).date()
+    naive = pd.Timestamp.combine(event_date, parsed_time.time())
+    return pd.Timestamp(naive, tz=ZoneInfo("America/New_York"))
+
+
+def _release_proximity_fields(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    if out.empty:
+        return out
+
+    now_et = pd.Timestamp.now(tz=ZoneInfo("America/New_York"))
+    if "event_date" in out.columns:
+        out["event_datetime_et"] = out.apply(_parse_event_datetime_et, axis=1)
+    else:
+        out["event_datetime_et"] = pd.NaT
+
+    mins: list[float | None] = []
+    labels: list[str] = []
+    urgencies: list[int] = []
+    stamps: list[str] = []
+
+    for value in out["event_datetime_et"].tolist():
+        if pd.isna(value):
+            mins.append(None)
+            labels.append("Date/Time Pending")
+            urgencies.append(10)
+            stamps.append("Pending ET")
+            continue
+
+        minutes = int((value - now_et).total_seconds() // 60)
+        mins.append(minutes)
+        stamps.append(value.strftime("%b %d, %I:%M %p ET"))
+        abs_minutes = abs(minutes)
+        if minutes > 180:
+            labels.append("Later")
+        elif 60 < minutes <= 180:
+            labels.append("Approaching")
+        elif 0 <= minutes <= 60:
+            labels.append("Imminent")
+        elif -30 <= minutes < 0:
+            labels.append("Live Window")
+        else:
+            labels.append("Passed")
+
+        if minutes >= 0:
+            urgency = max(20, 100 - min(minutes, 480) // 6)
+        else:
+            urgency = max(15, 85 - min(abs_minutes, 240) // 4)
+        urgencies.append(int(urgency))
+
+    out["minutes_to_release"] = mins
+    out["release_status"] = labels
+    out["urgency_score"] = urgencies
+    out["release_stamp_et"] = stamps
+    out["time_to_release"] = out["minutes_to_release"].apply(_format_minutes_to_release)
+    return out
+
+
+def _format_minutes_to_release(minutes: float | None) -> str:
+    if minutes is None or pd.isna(minutes):
+        return "Pending"
+    minutes = int(minutes)
+    if minutes > 0:
+        hours, mins = divmod(minutes, 60)
+        return f"In {hours}h {mins}m" if hours else f"In {mins}m"
+    if minutes == 0:
+        return "Now"
+    minutes = abs(minutes)
+    hours, mins = divmod(minutes, 60)
+    return f"{hours}h {mins}m ago" if hours else f"{mins}m ago"
+
+
 def _calendar_for_symbol(calendar: pd.DataFrame, symbol: str) -> tuple[pd.DataFrame, pd.DataFrame, str | None, str | None]:
     calendar = _prepare_dates(calendar)
     keywords = _event_keywords(symbol)
@@ -156,6 +491,7 @@ def _calendar_for_symbol(calendar: pd.DataFrame, symbol: str) -> tuple[pd.DataFr
         *filtered.apply(lambda row: _score_relevance(f"{row['country']} {row['event']}", symbol), axis=1)
     )
     filtered = filtered.sort_values(["relevance_score", "event_date", "time"], ascending=[False, True, True]).reset_index(drop=True)
+    filtered = _release_proximity_fields(filtered)
 
     today = pd.Timestamp.now().normalize()
     weekday = today.dayofweek
@@ -194,7 +530,7 @@ def _calendar_for_symbol(calendar: pd.DataFrame, symbol: str) -> tuple[pd.DataFr
             weekly_note = "No pair-relevant scheduled items were found in the next 7 days."
         weekly["day"] = weekly["event_date"].dt.strftime("%a")
         weekly["date_label"] = weekly["event_date"].dt.strftime("%Y-%m-%d")
-        weekly = weekly.sort_values(["event_date", "time", "relevance_score"], ascending=[True, True, False]).head(24)
+        weekly = weekly.sort_values(["event_date", "event_datetime_et", "time", "relevance_score"], ascending=[True, True, True, False]).head(24)
     else:
         weekly = filtered.head(14).copy()
         weekly["day"] = "Upcoming"
@@ -238,40 +574,70 @@ def _fetch_oanda_headlines(symbol: str) -> pd.DataFrame:
                 "url": urljoin(OANDA_ANALYSIS_URL, href),
                 "relevance_score": score,
                 "why_it_matters": reason or "pair relevance",
+                "market_angle": _news_angle(text),
                 "source": "OANDA Analysis",
             }
         )
 
     headlines = pd.DataFrame(rows)
     if headlines.empty:
-        return pd.DataFrame(columns=["headline", "url", "relevance_score", "why_it_matters", "source"])
-    return headlines.sort_values("relevance_score", ascending=False).drop_duplicates("headline").head(10).reset_index(drop=True)
+        return pd.DataFrame(columns=["headline", "url", "relevance_score", "why_it_matters", "market_angle", "source"])
+    headlines = headlines.sort_values(["relevance_score", "headline"], ascending=[False, True]).drop_duplicates("headline").head(10).reset_index(drop=True)
+    headlines["relevance_label"] = headlines["relevance_score"].apply(
+        lambda score: "High Relevance" if score >= 7 else "Relevant" if score >= 4 else "Peripheral"
+    )
+    return headlines
+
+
+def _timeline_from_calendar(weekly: pd.DataFrame) -> pd.DataFrame:
+    if weekly.empty:
+        return pd.DataFrame(columns=["event", "release_stamp_et", "urgency_score", "release_status", "time_to_release", "country"])
+
+    timeline = weekly.copy()
+    cols = [col for col in ["event", "release_stamp_et", "urgency_score", "release_status", "time_to_release", "country", "event_datetime_et"] if col in timeline.columns]
+    timeline = timeline[cols].copy()
+    if "event_datetime_et" in timeline.columns:
+        timeline = timeline.sort_values(["event_datetime_et", "urgency_score"], ascending=[True, False])
+    else:
+        timeline = timeline.sort_values("urgency_score", ascending=False)
+    return timeline.head(12).reset_index(drop=True)
 
 
 def fetch_market_context(symbol: str) -> MarketContextPacket:
     warnings: list[str] = []
+    source_note = "Economic calendar and headlines sourced from OANDA web pages when available."
 
     try:
         calendar = _fetch_calendar_table()
         daily, weekly, daily_note, weekly_note = _calendar_for_symbol(calendar, symbol)
     except Exception as exc:
-        daily = pd.DataFrame(columns=["time", "country", "event", "priority", "forecast", "actual", "previous", "why_it_matters"])
-        weekly = daily.copy()
-        daily_note = None
-        weekly_note = None
+        daily, daily_note = _fallback_daily_watchlist(symbol)
+        weekly, weekly_note = _fallback_weekly_watchlist(symbol)
         warnings.append(f"Economic calendar unavailable: {exc}")
+        source_note = "Live OANDA market-context sources were unavailable, so TruthLayer is showing a forex watchlist fallback."
 
     try:
         headlines = _fetch_oanda_headlines(symbol)
     except Exception as exc:
-        headlines = pd.DataFrame(columns=["headline", "url", "relevance_score", "why_it_matters", "source"])
+        headlines = _fallback_headlines(symbol)
         warnings.append(f"OANDA headlines unavailable: {exc}")
+        source_note = "Live OANDA market-context sources were unavailable, so TruthLayer is showing a forex watchlist fallback."
+
+    if daily.empty:
+        daily, fallback_daily_note = _fallback_daily_watchlist(symbol)
+        daily_note = daily_note or fallback_daily_note
+    if weekly.empty:
+        weekly, fallback_weekly_note = _fallback_weekly_watchlist(symbol)
+        weekly_note = weekly_note or fallback_weekly_note
+    if headlines.empty:
+        headlines = _fallback_headlines(symbol)
 
     return MarketContextPacket(
         daily_calendar=daily,
         weekly_calendar=weekly,
         headlines=headlines,
-        source_note="Economic calendar and headlines sourced from OANDA web pages when available.",
+        timeline=_timeline_from_calendar(weekly),
+        source_note=source_note,
         warning=" | ".join(warnings) if warnings else None,
         daily_note=daily_note,
         weekly_note=weekly_note,

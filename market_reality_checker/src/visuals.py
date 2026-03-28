@@ -88,3 +88,68 @@ def render_chart(
         yaxis={"gridcolor": "rgba(255,255,255,0.08)", "title": "Price"},
     )
     return figure
+
+
+def render_release_timeline(timeline: pd.DataFrame) -> go.Figure:
+    figure = go.Figure()
+    if timeline.empty:
+        figure.update_layout(
+            height=280,
+            paper_bgcolor="#050505",
+            plot_bgcolor="#050505",
+            font={"color": "#f2f2ee", "family": "IBM Plex Mono, monospace"},
+            annotations=[
+                {
+                    "text": "No timed releases available",
+                    "xref": "paper",
+                    "yref": "paper",
+                    "x": 0.5,
+                    "y": 0.5,
+                    "showarrow": False,
+                    "font": {"size": 16},
+                }
+            ],
+        )
+        return figure
+
+    ordered = timeline.copy()
+    ordered["display_label"] = ordered["event"].str.slice(0, 46)
+    color_map = {
+        "Imminent": "#d63a3a",
+        "Approaching": "#f2f2ee",
+        "Later": "#a8a8a2",
+        "Live Window": "#d63a3a",
+        "Passed": "#666660",
+        "Date/Time Pending": "#8a8a84",
+    }
+    colors = [color_map.get(value, "#f2f2ee") for value in ordered["release_status"]]
+    customdata = ordered[["release_stamp_et", "time_to_release", "country", "release_status"]].fillna("").values
+
+    figure.add_trace(
+        go.Bar(
+            x=ordered["urgency_score"],
+            y=ordered["display_label"],
+            orientation="h",
+            marker={"color": colors, "line": {"color": "rgba(255,255,255,0.12)", "width": 1}},
+            customdata=customdata,
+            hovertemplate=(
+                "<b>%{y}</b><br>"
+                "Release: %{customdata[0]}<br>"
+                "Timing: %{customdata[1]}<br>"
+                "Country: %{customdata[2]}<br>"
+                "Status: %{customdata[3]}<extra></extra>"
+            ),
+            name="Release Urgency",
+        )
+    )
+    figure.update_layout(
+        height=340,
+        margin={"l": 18, "r": 18, "t": 20, "b": 18},
+        paper_bgcolor="#050505",
+        plot_bgcolor="#050505",
+        font={"color": "#f2f2ee", "family": "IBM Plex Mono, monospace"},
+        xaxis={"title": "Release Urgency", "gridcolor": "rgba(255,255,255,0.08)", "range": [0, 100]},
+        yaxis={"title": None, "autorange": "reversed"},
+        showlegend=False,
+    )
+    return figure
