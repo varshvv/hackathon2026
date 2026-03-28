@@ -11,6 +11,7 @@ env/
 
 market_reality_checker/.venv/
 market_reality_checker/.streamlit/
+market_reality_checker/Library/
 
 .idea/
 .vscode/
