@@ -135,9 +135,11 @@ CSS = """
 }
 
 .block-container {
-    max-width: 1420px;
+    max-width: 1660px;
     padding-top: 1.2rem;
     padding-bottom: 2.3rem;
+    padding-left: 1.8rem;
+    padding-right: 1.8rem;
 }
 
 h1, h2, h3, h4 {
@@ -149,6 +151,8 @@ h1, h2, h3, h4 {
 [data-testid="stSidebar"] {
     background: linear-gradient(180deg, rgba(7,7,7,0.98), rgba(14,14,14,0.98));
     border-right: 1px solid var(--border);
+    min-width: 310px;
+    max-width: 310px;
 }
 
 [data-testid="stSidebar"] * {
@@ -270,38 +274,40 @@ h1, h2, h3, h4 {
     color: var(--muted);
 }
 
-.summary-grid {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 0.8rem;
-    margin: 0.9rem 0 1rem 0;
-}
-
 .summary-card {
     background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.025));
     border: 1px solid var(--border);
     border-radius: 18px;
-    padding: 0.95rem 1rem;
-    min-height: 7.3rem;
+    padding: 1.15rem 0.95rem 0.9rem 0.95rem;
+    min-height: 5.9rem;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    overflow: visible;
 }
 
 .summary-label {
     color: var(--muted);
-    font-size: 0.7rem;
-    letter-spacing: 0.16em;
+    font-size: 0.62rem;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
-    line-height: 1.35;
+    line-height: 1.05;
+    white-space: nowrap;
+    margin-top: 0.1rem;
 }
 
 .summary-value {
     color: var(--text);
     font-family: "Source Serif 4", Georgia, serif;
-    font-size: 1.45rem;
-    line-height: 1.15;
-    word-break: break-word;
+    font-size: 1.24rem;
+    line-height: 1.08;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+}
+
+.summary-value-compact {
+    font-size: 1.05rem;
+    line-height: 1.2;
 }
 
 .callout-label {
@@ -357,6 +363,28 @@ h1, h2, h3, h4 {
     font-size: 0.76rem;
     letter-spacing: 0.08em;
     margin-top: 0.7rem;
+}
+
+.longform-shell {
+    margin-bottom: 1rem;
+}
+
+.longform-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.95rem;
+    margin-top: 0.9rem;
+}
+
+.longform-card {
+    background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.02));
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 1.1rem 1.15rem;
+}
+
+.longform-card-wide {
+    grid-column: 1 / -1;
 }
 
 .calendar-board {
@@ -447,12 +475,26 @@ h1, h2, h3, h4 {
     overflow: hidden;
 }
 
-@media (max-width: 980px) {
-    .summary-grid {
-        grid-template-columns: 1fr 1fr;
+@media (min-width: 1280px) {
+    .summary-value {
+        font-size: 1.32rem;
     }
 
+    .summary-value-compact {
+        font-size: 1.08rem;
+    }
+
+    .hero-title {
+        font-size: 3.35rem;
+    }
+}
+
+@media (max-width: 980px) {
     .hero-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .longform-grid {
         grid-template-columns: 1fr;
     }
 

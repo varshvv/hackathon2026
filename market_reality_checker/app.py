@@ -64,13 +64,16 @@ def draw_header(result: dict | None) -> None:
 
 def sidebar_controls() -> dict:
     with st.sidebar:
+        st.markdown("## Navigation")
+        page = st.radio("View", ["Terminal", "Use Cases"], index=0)
         st.markdown("## Controls")
         symbol = st.selectbox("Symbol", list(SYMBOLS.keys()), index=list(SYMBOLS.keys()).index(DEFAULT_SYMBOL))
         interval = st.selectbox("Interval", list(INTERVAL_CONFIG.keys()), index=list(INTERVAL_CONFIG.keys()).index(DEFAULT_INTERVAL))
         lookback = st.selectbox("Lookback", list(LOOKBACK_DAYS.keys()), index=list(LOOKBACK_DAYS.keys()).index(DEFAULT_LOOKBACK))
-        analyze = st.button("Run Analysis", type="primary", use_container_width=True)
+        analyze = st.button("Run Analysis", type="primary", use_container_width=True) if page == "Terminal" else False
         st.caption("TruthLayer evaluates recent live forex bars from Yahoo Finance. If current data is unavailable, analysis does not proceed.")
     return {
+        "page": page,
         "symbol": symbol,
         "interval": interval,
         "lookback": lookback,
@@ -156,21 +159,33 @@ def render_callouts(triggered_rules: list[dict], timestamps: list[str]) -> None:
 def render_summary(result: dict, packet, interval: str) -> None:
     now_et = pd.Timestamp.now(tz="America/New_York")
     weekend_market = now_et.dayofweek >= 5
-    freshness = "Weekend Close" if weekend_market else (f"{packet.staleness_minutes} min" if packet.staleness_minutes is not None else "Unavailable")
+    if weekend_market:
+        feed_state = "Weekend"
+    elif packet.staleness_minutes is None:
+        feed_state = "Unavailable"
+    elif packet.staleness_minutes <= ENGINE_CONFIG["stale_after_minutes"][interval]:
+        feed_state = "Current"
+    else:
+        feed_state = "Delayed"
+    market_data_value = f"Yahoo Finance | {feed_state}"
     summary_cards = [
-        ("Integrity Score", f"{result['integrity_score']:.1f}"),
+        ("Integrity", f"{result['integrity_score']:.1f}"),
         ("Assessment", result["status"]),
         ("Exceptions", str(result["active_alerts"])),
-        ("Data Venue", "Yahoo Finance FX"),
-        ("Feed State", freshness),
+        ("Market Data", market_data_value),
     ]
-    summary_columns = st.columns(len(summary_cards))
+    summary_columns = st.columns([1.45, 1.0, 0.8, 1.55], gap="small")
     for column, (label, value) in zip(summary_columns, summary_cards):
+        value_class = "summary-value"
+        if label == "Market Data":
+            value_class += " summary-value-compact"
+        if label == "Integrity":
+            value_class += " summary-value-emphasis"
         column.markdown(
             f"""
             <div class="summary-card">
                 <div class="summary-label">{label}</div>
-                <div class="summary-value">{value}</div>
+                <div class="{value_class}">{value}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -233,6 +248,92 @@ def render_methodology(result: dict) -> None:
             st.markdown(f"**{item['name']}**")
             st.markdown(f"- Why: {item['why']}")
             st.markdown(f"- Function: {item['used_for']}")
+
+
+def render_use_cases_page() -> None:
+    st.markdown(
+        """
+        <div class="terminal-shell longform-shell">
+            <div class="hero-kicker">Product Brief</div>
+            <div class="hero-title">TruthLayer<br>Use Cases And Strategic Value</div>
+            <div class="hero-subtitle">
+                TruthLayer is designed as a market-verification layer for desks, analysts, and risk teams that need to decide whether observed FX price action deserves trust, review, or escalation before it influences action.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="longform-grid">
+            <div class="longform-card">
+                <div class="callout-label">Why It Is Needed</div>
+                <div class="callout-description">
+                    Most market tools answer the question “what may happen next.” TruthLayer answers a different and often more important question first: “does the move currently on screen look structurally believable?” In fast FX markets, participants frequently react to motion before validating whether that motion is consistent with the recent regime, the current volatility environment, and the surrounding macro calendar. That gap creates unnecessary execution risk, weakens analyst judgment, and makes it harder to separate meaningful repricing from unstable tape.
+                </div>
+                <div class="callout-description">
+                    TruthLayer addresses that gap by providing an explainable integrity layer. It does not forecast, recommend a trade, or imitate an exchange-surveillance platform. Instead, it creates a disciplined checkpoint between observation and action, which is exactly where many workflows are weakest during periods of uncertainty or headline-driven moves.
+                </div>
+            </div>
+            <div class="longform-card">
+                <div class="callout-label">Who It Helps</div>
+                <div class="callout-description">
+                    For discretionary macro traders, it provides a fast sanity check before leaning into a move. For sales and trading desks, it offers a cleaner explanation of whether a sudden move appears regime-consistent or requires caution. For risk managers and treasury teams, it gives an understandable signal that recent behavior may be unstable even when the headline chart still looks orderly. For research teams, it helps separate clean macro repricing from noisy short-horizon distortions before writing a view around the move.
+                </div>
+                <div class="callout-description">
+                    The tool is also useful in demos, education, and internal market reviews because every signal is rule-based and inspectable. A user can see not just that a bar was flagged, but why it was flagged and how far it sat outside its recent envelope.
+                </div>
+            </div>
+            <div class="longform-card">
+                <div class="callout-label">What It Replaces</div>
+                <div class="callout-description">
+                    In many teams, this kind of judgment is currently assembled from fragmented habits: a chart glance, a mental estimate of how unusual the bar feels, a quick check of the macro calendar, and a manual comparison against recent conditions. TruthLayer does not eliminate human judgment, but it replaces that inconsistent ad hoc process with a repeatable diagnostic layer. The result is less dependence on instinct alone and less need to jump between multiple tools to answer a basic credibility question.
+                </div>
+                <div class="callout-description">
+                    It also improves on simplistic alerting. A fixed “large move” threshold is often too naive for FX because major pairs trade on different decimal scales and volatility regimes shift quickly. TruthLayer normalizes by pips, compares moves to rolling and robust envelopes, and looks for structural patterns such as jump-revert behavior and directional drift.
+                </div>
+            </div>
+            <div class="longform-card">
+                <div class="callout-label">Why It Is Better</div>
+                <div class="callout-description">
+                    TruthLayer is better than a static alert sheet because it is context-aware. It is better than a prediction model for this use case because it stays focused on verification rather than speculative forecasting. It is better than a black-box anomaly score because every alert is explainable, tied to observable features, and easy to present to a non-technical audience. That matters in a demo setting, but it also matters in real institutional workflows where trust, auditability, and interpretability drive adoption.
+                </div>
+                <div class="callout-description">
+                    The platform is also operationally practical. It runs locally, uses a lean Python and Streamlit stack, consumes live forex bars, surfaces macro context, and degrades gracefully when external context sources are limited. That combination makes it credible as a prototype and useful as a decision-support interface.
+                </div>
+            </div>
+            <div class="longform-card longform-card-wide">
+                <div class="callout-label">Representative Use Cases</div>
+                <div class="callout-description">
+                    <strong>Pre-trade validation:</strong> a trader sees EUR/USD move sharply through a local range and wants to know whether that move looks like orderly repricing or unstable short-term motion before chasing it.
+                </div>
+                <div class="callout-description">
+                    <strong>Desk commentary support:</strong> a strategist or salesperson needs to explain whether a move appears fundamentally consistent with the macro backdrop or whether the move should be treated with caution pending confirmation.
+                </div>
+                <div class="callout-description">
+                    <strong>Risk escalation:</strong> a treasury or risk function wants a clear indication that current market behavior is outside its recent local regime and deserves closer monitoring before exposures are adjusted.
+                </div>
+                <div class="callout-description">
+                    <strong>Post-event review:</strong> after a data release, the team can review flagged bars, compare them with the local envelope, and assess whether the reaction looked clean, disorderly, or quickly reversed.
+                </div>
+                <div class="callout-description">
+                    <strong>Market-open monitoring:</strong> over weekends and session transitions, the context layer can surface the most relevant reopening or macro-sensitive windows so the desk has a forward-looking checklist rather than just a backward-looking chart.
+                </div>
+            </div>
+            <div class="longform-card longform-card-wide">
+                <div class="callout-label">Why The Architecture Matters</div>
+                <div class="callout-description">
+                    The architecture is intentionally lightweight because that improves reliability. The system uses live Yahoo Finance forex bars for current price data, a modular analysis engine for explainable quantitative checks, and a context layer for scheduled macro risk and relevant headlines. Each component can be understood independently. That makes the product easier to trust, easier to maintain, and easier to extend to additional currency pairs or richer institutional-grade feeds later.
+                </div>
+                <div class="callout-description">
+                    For a hackathon, this balance matters. The product looks like a real tool, tells a differentiated story, and demonstrates an identifiable workflow improvement without making exaggerated claims about surveillance-grade certainty or predictive power. It is best positioned as a practical market-integrity prototype: narrow in scope, clear in function, and strong in explainability.
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _today_calendar_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -445,10 +546,15 @@ def render_market_context(context_packet, symbol: str) -> None:
 
 def main() -> None:
     controls = sidebar_controls()
+    draw_header(st.session_state.get("last_result"))
+
+    if controls["page"] == "Use Cases":
+        render_use_cases_page()
+        return
+
     engine = MarketEngine()
 
     if not controls["analyze"] and "last_result" not in st.session_state:
-        draw_header(None)
         render_notice("Run the analysis to load the live market view. This terminal is forex-specific and evaluates current Yahoo Finance data only.", tone="subtle")
         return
 
@@ -472,8 +578,6 @@ def main() -> None:
     packet = st.session_state["last_packet"]
     context_packet = st.session_state.get("last_context")
     result = st.session_state["last_result"]
-
-    draw_header(result)
     render_summary(result, packet, controls["interval"])
 
     left, right = st.columns([1.45, 1])
